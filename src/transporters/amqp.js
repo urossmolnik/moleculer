@@ -9,6 +9,7 @@
 const Promise		= require("bluebird");
 const Transporter 	= require("./base");
 const { isPromise }	= require("../utils");
+const { randomBytes } = require("crypto");
 
 const {
 	PACKET_REQUEST,
@@ -72,6 +73,10 @@ class AmqpTransporter extends Transporter {
 
 		if (typeof opts.consumeOptions !== "object")
 			opts.consumeOptions = {};
+
+		if (opts.reqTopicNodeIDStripper && typeof opts.reqTopicNodeIDStripper !== 'function') {
+			opts.reqTopicNodeIDStripper = undefined;
+		}
 
 		super(opts);
 
@@ -216,15 +221,21 @@ class AmqpTransporter extends Transporter {
 		switch(packetType) {
 			// Requests and responses don't expire.
 			case PACKET_REQUEST:
-			case PACKET_RESPONSE:
 				packetOptions = {};
+				break;
+			case PACKET_RESPONSE:
+				packetOptions = !!this.opts.reqTopicNodeIDStripper
+					? { autoDelete: true }
+					: {};
 				break;
 
 			// Consumers can decide how long events live
 			// Load-balanced/grouped events
 			case PACKET_EVENT + "LB":
 			case PACKET_EVENT:
-				packetOptions = {};
+				packetOptions = !!this.opts.reqTopicNodeIDStripper
+					? { autoDelete: true }
+					: {};
 				// If eventTimeToLive is specified, add to options.
 				if (this.opts.eventTimeToLive)
 					packetOptions.messageTtl = this.opts.eventTimeToLive;
@@ -284,6 +295,21 @@ class AmqpTransporter extends Transporter {
 
 			return result;
 		};
+	}
+
+	/**
+	 * Get topic name from command & target nodeID
+	 *
+	 * @param {any} cmd
+	 * @param {any} nodeID
+	 *
+	 * @memberof AmqpTransporter
+	 */
+	getTopicName(cmd, nodeID) {
+		if (nodeID && !!this.opts.reqTopicNodeIDStripper && cmd === PACKET_REQUEST) {
+			return super.getTopicName(cmd, this.opts.reqTopicNodeIDStripper(nodeID));
+		}
+		return super.getTopicName(cmd, nodeID);
 	}
 
 
